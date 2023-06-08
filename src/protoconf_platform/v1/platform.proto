@@ -1,0 +1,113 @@
+syntax = "proto3";
+
+package protoconf_platform.v1;
+
+import "google/protobuf/any.proto";
+
+message Component {
+    string domain = 1;
+    // `name` of the component
+    string name = 2;
+
+    string description = 3;
+
+    Metadata metadata = 4;
+
+    // Objectives == SLOs, RTOs and RPOs of the component
+    repeated Objective objectives = 5;
+
+    repeated Component upstreams = 6;
+
+    Status status = 7;
+
+    map<string,google.protobuf.Any> configs = 8;
+
+    message Metadata {
+        repeated string tags = 1;
+        map<string, string> labels = 2;
+    }
+
+    enum Status {
+        STATUS_UNSPECIFIED = 0;
+        STATUS_OK = 1;
+        STATUS_WARN = 2;
+        STATUS_CRIT = 3;
+        STATUS_FATAL = 4;
+    }
+
+    message Objective {
+        string name = 1;
+        string description = 2;
+        Type type = 3;
+        oneof action {
+            Check check = 4;
+            Query query = 5;
+        }
+        Component.Status severity = 10;
+        ObjectiveState state = 11;
+
+        enum Type {
+            TYPE_UNSPECIFIED = 0;
+            TYPE_SLO = 1;
+            TYPE_RPO = 2;
+            TYPE_RTO = 3;
+        }
+
+        message Check {
+            // TODO(smintz): Fill this out
+        }
+
+        message Query {
+            string datasource = 1;
+            string query = 2;
+
+            // `query_template` is used generate query per caller
+            string query_template = 3;
+            float min = 4;
+            float max = 5;
+        }
+
+        message ObjectiveState {
+            string reason = 1;
+            double value = 2;
+            bool firing = 3;
+        }
+    }
+}
+
+
+message State {
+    map<string,Domain> domains = 1;
+    ObjectivesRegistry registry = 2;
+
+    message Domain {
+        string name = 1;
+        Metadata metadata = 2;
+        Component head = 3;
+
+        message Metadata {
+            repeated string tags = 1;
+            map<string,string> labels = 2;
+        }
+    }
+}
+
+message ObjectivesRegistry {
+    map<string,Domain> domains = 1;
+
+
+    message Domain{
+
+        map<string,Objectives> services = 1;
+
+        message Objectives {
+            map<string,Component.Objective.ObjectiveState> states = 1;
+        }
+    }
+}
+
+message MonitorConfig {
+    string read_prefix = 1;
+    string write_prefix = 2;
+    repeated string keys = 3;
+}

@@ -1,0 +1,22 @@
+{
+  "protoFile": "protoconf_platform/v1/platform.proto",
+  "value": {
+    "@type": "type.googleapis.com/protoconf_platform.v1.State",
+    "domains": {
+      "test": {
+        "metadata": {},
+        "head": {
+          "domain": "test",
+          "name": "test",
+          "metadata": {},
+          "status": "STATUS_OK"
+        }
+      }
+    },
+    "registry": {
+      "domains": {
+        "test": {}
+      }
+    }
+  }
+}

@@ -1,0 +1,98 @@
+load("//check/check.pinc", "check")
+load("//protoconf_platform/v1/core.pinc", "core")
+load("//protoconf_platform/v1/monitoring.pinc", "monitoring")
+load("//google/protobuf/struct.proto", "Value")
+load("any.star", "any")
+
+
+def TestState(head, *hooks):
+    return core.State(core.Domain("test", head), *hooks)
+
+
+def SimpleComponent(*hooks):
+    return lambda domain: domain.Component(*hooks)
+
+
+def test_set_name():
+    state = TestState(SimpleComponent(core.SetName("test")))
+
+    check.eq(state.domains["test"].head.name, "test")
+    return state
+
+
+def test_set_domain_name():
+    state = TestState(SimpleComponent(core.SetName("test")))
+    check.eq(state.domains["test"].head.domain, "test")
+    return state
+
+
+def test_add_dependency():
+    state = TestState(
+        lambda domain: domain.Component(
+            core.SetName("main"),
+            core.AddDependency(SimpleComponent(core.SetName("dependency"))(domain)),
+        )
+    )
+    check.contains([i.name for i in state.domains["test"].head.upstreams], "dependency")
+    return state
+
+
+def test_add_ciritcal_dependency():
+    Dependency = SimpleComponent(
+        core.SetName("dependency"), monitoring.AddCriticalSLO("ERROR_RATE")
+    )
+    state = TestState(
+        lambda domain: domain.Component(
+            core.SetName("main"), core.AddCriticalDependency(Dependency(domain)),
+        ),
+        core.SetComponentObjectiveState(
+            "test", "dependency", "ERROR_RATE", firing=True
+        ),
+    )
+    check.eq(state.domains["test"].head.status, monitoring.CRIT)
+    return state
+
+
+def test_config():
+    myconfig = Value(bool_value=True)
+    state = TestState(
+        SimpleComponent(core.SetName("test"), core.Config("myconfig", myconfig))
+    )
+    check.contains(state.domains["test"].head.configs, "myconfig")
+    return state
+
+
+def test_config_alteration():
+    myconfig = Value(string_value="original")
+
+    def alter_config(_component, _dep):
+        myconfig.string_value = "altered"
+
+    Dependency = SimpleComponent(
+        core.SetName("dependency"), monitoring.AddCriticalSLO("ERROR_RATE")
+    )
+    state = TestState(
+        lambda domain: domain.Component(
+            core.SetName("main"),
+            core.Config("myconfig", myconfig),
+            core.AddDependency(Dependency(domain), warning=alter_config),
+        ),
+        core.SetComponentObjectiveState(
+            "test", "dependency", "ERROR_RATE", firing=True
+        ),
+    )
+
+    check.eq(myconfig.string_value, "altered")
+    check.contains(state.domains["test"].head.configs["myconfig"].value, "altered")
+    return state
+
+
+def main():
+    return {
+        "test_set_name": test_set_name(),
+        "test_set_domain_name": test_set_domain_name(),
+        "test_add_dependancy": test_add_dependency(),
+        "test_add_ciritcal_dependency": test_add_ciritcal_dependency(),
+        "test_config": test_config(),
+        "test_config_alteration": test_config_alteration(),
+    }

@@ -1,0 +1,51 @@
+{
+  "protoFile": "protoconf_platform/v1/platform.proto",
+  "value": {
+    "@type": "type.googleapis.com/protoconf_platform.v1.State",
+    "domains": {
+      "test": {
+        "metadata": {},
+        "head": {
+          "domain": "test",
+          "name": "main",
+          "metadata": {},
+          "upstreams": [
+            {
+              "domain": "test",
+              "name": "dependency",
+              "metadata": {},
+              "objectives": [
+                {
+                  "name": "ERROR_RATE",
+                  "description": "ERROR_RATE",
+                  "type": "TYPE_SLO",
+                  "severity": "STATUS_CRIT",
+                  "state": {
+                    "firing": true
+                  }
+                }
+              ],
+              "status": "STATUS_CRIT"
+            }
+          ],
+          "status": "STATUS_CRIT"
+        }
+      }
+    },
+    "registry": {
+      "domains": {
+        "test": {
+          "services": {
+            "dependency": {
+              "states": {
+                "ERROR_RATE": {
+                  "firing": true
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

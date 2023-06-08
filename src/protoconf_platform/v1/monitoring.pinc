@@ -1,0 +1,89 @@
+load(
+    "platform.proto", "MonitorConfig", ComponentProto="Component",
+)
+load("core.pinc", "Walk")
+
+
+def NewObjective(
+    objective_type,
+    name,
+    desc=None,
+    check=None,
+    query=None,
+    severity=ComponentProto.Status.STATUS_UNSPECIFIED,
+):
+    def do(component, next):
+        objective = ComponentProto.Objective(
+            name=name,
+            description=desc if desc else name,
+            type=objective_type,
+            severity=severity,
+            state=ComponentProto.Objective.ObjectiveState(firing=False),
+        )
+        if check:
+            objective.check = check
+        if query:
+            objective.query = query
+        component.objectives.append(objective)
+        return next(component)
+
+    return do
+
+
+def AddSLO(*args, **kwargs):
+    return NewObjective(ComponentProto.Objective.Type.TYPE_SLO, *args, **kwargs)
+
+
+def AddCriticalSLO(*args, **kwargs):
+    kwargs["severity"] = ComponentProto.Status.STATUS_CRIT
+    return AddSLO(*args, **kwargs)
+
+
+def AddWarningSLO(*args, **kwargs):
+    kwargs["severity"] = ComponentProto.Status.STATUS_WARN
+    return AddSLO(*args, **kwargs)
+
+
+def AddFatalSLO(*args, **kwargs):
+    kwargs["severity"] = ComponentProto.Status.STATUS_FATAL
+    return AddSLO(*args, **kwargs)
+
+
+def gen_monitoring_config_per_component(component, outputs, list_keys):
+    for obj in component.objectives:
+        key = "/".join([component.domain, component.name, obj.name])
+        outputs[key] = obj
+        list_keys.append(key)
+    for dep in component.upstreams:
+        outputs, list_keys = gen_monitoring_config_per_component(
+            dep, outputs, list_keys
+        )
+    return outputs, list_keys
+
+
+def GenerateMonitoringConfigs(read_prefix, write_prefix, state, outputs):
+    list_keys = []
+    for domain in state.domains.values():
+        outputs, list_keys = gen_monitoring_config_per_component(
+            domain.head, outputs, list_keys
+        )
+
+    outputs["keys"] = MonitorConfig(
+        read_prefix=read_prefix, write_prefix=write_prefix, keys=list(set(list_keys))
+    )
+    return outputs
+
+
+monitoring = struct(
+    AddSLO=AddSLO,
+    AddCriticalSLO=AddCriticalSLO,
+    AddFatalSLO=AddFatalSLO,
+    AddWarningSLO=AddWarningSLO,
+    Query=ComponentProto.Objective.Query,
+    Check=ComponentProto.Objective.Check,
+    OK=ComponentProto.Status.STATUS_OK,
+    WARN=ComponentProto.Status.STATUS_WARN,
+    CRIT=ComponentProto.Status.STATUS_CRIT,
+    FATAL=ComponentProto.Status.STATUS_FATAL,
+    State=ComponentProto.Objective.ObjectiveState,
+)

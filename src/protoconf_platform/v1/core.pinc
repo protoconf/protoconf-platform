@@ -1,0 +1,235 @@
+load(
+    "platform.proto",
+    "ObjectivesRegistry",
+    ComponentProto="Component",
+    StateProto="State",
+)
+load("any.star", "any")
+
+
+def Chain(msg, *hooks):
+    queue = list(hooks)
+    queue.append(lambda msg, _: msg)
+
+    def run_next(c):
+        next = queue.pop(0)
+        return next(c, run_next)
+
+    first = queue.pop(0)
+    return first(msg, run_next)
+
+
+def Component(*hooks):
+    component = ComponentProto(metadata=ComponentProto.Metadata(tags=[], labels={}))
+    return Chain(component, *hooks)
+
+
+def SetName(name):
+    def do(component, next):
+        component.name = name
+        return next(component)
+
+    return do
+
+
+def SetDescription(desc):
+    def do(component, next):
+        component.description = desc
+        return next(component)
+
+    return do
+
+
+def SetTags(*tags):
+    def do(component, next):
+        component.metadata.tags = list(tags)
+        return next(component)
+
+    return do
+
+
+def AddTags(*tags):
+    def do(component, next):
+        component.metadata.tags.extend(tags)
+        return next(component)
+
+    return do
+
+
+def SetLabels(**labels):
+    def do(component, next):
+        component.metadata.labels.update(labels)
+        return next(component)
+
+    return do
+
+
+def From(c):
+    def do(component, next):
+        return next(c)
+
+    return do
+
+
+def CopySev(component, dep):
+    component.status = dep.status
+    return component
+
+
+def AddDependency(dep, warning=None, critical=None, fatal=None, ok=None, any=None):
+    def do(component, next):
+        component.upstreams.append(dep)
+        component = next(component)
+        if any:
+            any(component, dep)
+        if dep.status >= ComponentProto.Status.STATUS_WARN and warning:
+            warning(component, dep)
+        if dep.status >= ComponentProto.Status.STATUS_CRIT and critical:
+            critical(component, dep)
+        if dep.status >= ComponentProto.Status.STATUS_FATAL and fatal:
+            fatal(component, dep)
+        if dep.status == ComponentProto.Status.STATUS_OK and ok:
+            ok(component, dep)
+        return component
+
+    return do
+
+
+def AddCriticalDependency(dep, **kwargs):
+    return AddDependency(dep, any=CopySev, **kwargs)
+
+
+def Config(name, cfg, func=None):
+    def do(component, next):
+        if len(component.upstreams) > 0:
+            print(
+                "\n\
+        ⚠️ ⚠️ ⚠️\n\
+            WARNING: Set `core.Config(...)` hooks before `core.AddDependency(...)` hooks to avoid incorrect configurations.️\n\
+            Component Name:%s, Config Name:%s \n\
+        ⚠️ ⚠️ ⚠️\n"
+                % (component.name, name)
+            )
+        component = next(component)
+        config = cfg
+        if config:
+            any.unpack(component.configs.setdefault(name, any.new(config)), config)
+        if func:
+            config = func(component, config)
+        component.configs[name] = any.new(config)
+        return component
+
+    return do
+
+
+def Debug(component, next):
+    print(component, next)
+    return next(component)
+
+
+def State(*hooks):
+    state = StateProto(registry=ObjectivesRegistry())
+
+    return Chain(state, *hooks)
+
+
+def SetComponentObjectiveState(
+    domain_name, component_name, objective_name, firing=False, value=0.0
+):
+    def do(state, next):
+        domain = state.registry.domains.setdefault(
+            domain_name, ObjectivesRegistry.Domain()
+        )
+        service = domain.services.setdefault(
+            component_name, ObjectivesRegistry.Domain.Objectives()
+        )
+        objective = service.states.setdefault(
+            objective_name, ComponentProto.Objective.ObjectiveState()
+        )
+        objective.firing = firing
+        objective.value = value
+
+        return next(state)
+
+    return do
+
+
+def SetDomain(name):
+    def do(component, next):
+        component.domain = name
+        for dep in component.upstreams:
+            dep = Component(From(dep), SetDomain(name))
+        return next(component)
+
+    return do
+
+
+def ResolveStatus(registry):
+    def do(component, next):
+        local_registry = registry.services.get(
+            component.name, ObjectivesRegistry.Domain.Objectives(),
+        )
+        if component.status == ComponentProto.Status.STATUS_UNSPECIFIED:
+            component.status = ComponentProto.Status.STATUS_OK
+        for obj in component.objectives:
+            state = local_registry.states.get(obj.name, obj.state)
+            obj.state = state
+            if state.firing and obj.severity > component.status:
+                component.status = obj.severity
+
+        for dep in component.upstreams:
+            dep = Component(From(dep), ResolveStatus(registry))
+        return next(component)
+
+    return do
+
+
+def Domain(name, head, *hooks):
+    def do(state, next):
+        state = next(state)
+        registry = state.registry.domains.setdefault(
+            name, ObjectivesRegistry.Domain(services={})
+        )
+
+        def DomainComponent(*hooks):
+            inputs = [SetDomain(name)] + list(hooks) + [ResolveStatus(registry)]
+            return Component(*inputs)
+
+        domain = Chain(
+            StateProto.Domain(metadata=StateProto.Domain.Metadata(tags=[], labels={}),),
+            *hooks
+        )
+        carebare = module(
+            "carebare", Component=DomainComponent, DomainMetaData=domain.metadata
+        )
+        domain.head = head(carebare)
+        state.domains[name] = domain
+        return state
+
+    return do
+
+
+def Walk(component, func):
+    func(component)
+    for dep in component.upstreams:
+        Walk(dep, func)
+
+
+core = module(
+    "core",
+    Component=Component,
+    From=From,
+    SetName=SetName,
+    SetDescription=SetDescription,
+    SetTags=SetTags,
+    AddTags=AddTags,
+    SetLabels=SetLabels,
+    Config=Config,
+    Debug=Debug,
+    AddDependency=AddDependency,
+    AddCriticalDependency=AddCriticalDependency,
+    State=State,
+    Domain=Domain,
+    ResolveStatus=ResolveStatus,
+    SetComponentObjectiveState=SetComponentObjectiveState,
+)
